@@ -86,6 +86,8 @@ LOOT_IMAGES = {
     "weapon": load_image_scaled("LootWeapon.png", (18, 18)),
     "health": load_image_scaled("LootHealth.png", (18, 18)),
     "score": load_image_scaled("LootScore.png", (18, 18)),
+    "invincibility": load_image_scaled("LootInvincible.png", (18, 18)),
+    "double_damage": load_image_scaled("LootDamage.png", (18, 18)),
 }
 BEE_FRAMES = [load_image_scaled(f"EnemyBee{i}.png", (34, 34)) for i in (1, 2, 3, 4)]
 BEE_STATIC = load_image_scaled("EnemyBee.png", (34, 34))
@@ -110,7 +112,7 @@ class Weapon:
     def is_broken(self):
         return self.durability is not None and self.durability <= 0
 
-    def draw(self, surface, x, y, facing):
+    def draw(self, surface, x, y, facing, angle=0):
         img = WEAPON_IMAGES.get(self.name)
         if img is not None:
             try:
@@ -122,56 +124,90 @@ class Weapon:
                 pass
             if facing < 0:
                 img = pygame.transform.flip(img, True, False)
-                dest_x = x - img.get_width()
+                pivot = (img.get_width(), img.get_height() // 2)
             else:
-                dest_x = x
-            dest_y = y - img.get_height() // 2
-            surface.blit(img, (dest_x, dest_y))
+                pivot = (0, img.get_height() // 2)
+                
+            if angle != 0:
+                # original center of image relative to pivot
+                cx = img.get_width() / 2 - pivot[0]
+                cy = img.get_height() / 2 - pivot[1]
+                
+                # rotate this vector (pygame rotates CCW for positive angle)
+                rad = math.radians(-angle)
+                rx = cx * math.cos(rad) - cy * math.sin(rad)
+                ry = cx * math.sin(rad) + cy * math.cos(rad)
+                
+                rotated_img = pygame.transform.rotate(img, angle)
+                
+                # center of the rotated image will be at (x + rx, y + ry)
+                dest_x = x + rx - rotated_img.get_width() / 2
+                dest_y = y + ry - rotated_img.get_height() / 2
+                surface.blit(rotated_img, (dest_x, dest_y))
+            else:
+                dest_x = x - pivot[0]
+                dest_y = y - pivot[1]
+                surface.blit(img, (dest_x, dest_y))
             return
 
         color = self.color or GRAY
         direction = 1 if facing >= 0 else -1
 
+        temp = pygame.Surface((80, 80), pygame.SRCALPHA)
+        cx_pos, cy_pos = 40, 40
+
         def tx(dx):
-            return x + dx * direction
+            return cx_pos + dx * direction
 
         if self.name == "Stick":
-            points = [(tx(0), y), (tx(4), y - 6), (tx(32), y - 4), (tx(32), y + 4)]
-            pygame.draw.polygon(surface, BROWN, points)
-            pygame.draw.polygon(surface, BLACK, points, 2)
+            points = [(tx(0), cy_pos), (tx(4), cy_pos - 6), (tx(32), cy_pos - 4), (tx(32), cy_pos + 4)]
+            pygame.draw.polygon(temp, BROWN, points)
+            pygame.draw.polygon(temp, BLACK, points, 2)
         elif self.name == "Sword":
-            blade = pygame.Rect(min(tx(6), tx(24)), y - 3, abs(tx(24) - tx(6)), 6)
-            pygame.draw.rect(surface, color, blade)
-            pygame.draw.rect(surface, BLACK, blade, 2)
-            pygame.draw.line(surface, BLACK, (tx(8), y), (tx(16), y), 3)
+            blade = pygame.Rect(min(tx(6), tx(24)), cy_pos - 3, abs(tx(24) - tx(6)), 6)
+            pygame.draw.rect(temp, color, blade)
+            pygame.draw.rect(temp, BLACK, blade, 2)
+            pygame.draw.line(temp, BLACK, (tx(8), cy_pos), (tx(16), cy_pos), 3)
         elif self.name == "Hammer":
-            handle = pygame.Rect(min(tx(0), tx(12)), y + 2, abs(tx(12) - tx(0)), 4)
-            pygame.draw.rect(surface, BROWN, handle)
-            head = pygame.Rect(min(tx(12), tx(26)), y - 8, abs(tx(26) - tx(12)), 16)
-            pygame.draw.rect(surface, color, head)
-            pygame.draw.rect(surface, BLACK, head, 2)
+            handle = pygame.Rect(min(tx(0), tx(12)), cy_pos + 2, abs(tx(12) - tx(0)), 4)
+            pygame.draw.rect(temp, BROWN, handle)
+            head = pygame.Rect(min(tx(12), tx(26)), cy_pos - 8, abs(tx(26) - tx(12)), 16)
+            pygame.draw.rect(temp, color, head)
+            pygame.draw.rect(temp, BLACK, head, 2)
         elif self.name == "Spear":
-            shaft = pygame.Rect(min(tx(0), tx(24)), y + 1, abs(tx(24) - tx(0)), 4)
-            pygame.draw.rect(surface, color, shaft)
-            tip = [(tx(24), y - 4), (tx(32), y + 2), (tx(24), y + 8)]
-            pygame.draw.polygon(surface, color, tip)
-            pygame.draw.polygon(surface, BLACK, tip, 2)
+            shaft = pygame.Rect(min(tx(0), tx(24)), cy_pos + 1, abs(tx(24) - tx(0)), 4)
+            pygame.draw.rect(temp, color, shaft)
+            tip = [(tx(24), cy_pos - 4), (tx(32), cy_pos + 2), (tx(24), cy_pos + 8)]
+            pygame.draw.polygon(temp, color, tip)
+            pygame.draw.polygon(temp, BLACK, tip, 2)
         elif self.name == "Axe":
-            handle = pygame.Rect(min(tx(0), tx(18)), y + 3, abs(tx(18) - tx(0)), 4)
-            pygame.draw.rect(surface, BROWN, handle)
-            blade = [(tx(16), y - 8), (tx(28), y - 2), (tx(16), y + 10)]
-            pygame.draw.polygon(surface, color, blade)
-            pygame.draw.polygon(surface, BLACK, blade, 2)
+            handle = pygame.Rect(min(tx(0), tx(18)), cy_pos + 3, abs(tx(18) - tx(0)), 4)
+            pygame.draw.rect(temp, BROWN, handle)
+            blade = [(tx(16), cy_pos - 8), (tx(28), cy_pos - 2), (tx(16), cy_pos + 10)]
+            pygame.draw.polygon(temp, color, blade)
+            pygame.draw.polygon(temp, BLACK, blade, 2)
         elif self.name == "Dagger":
-            blade = pygame.Rect(min(tx(0), tx(18)), y + 1, abs(tx(18) - tx(0)), 4)
-            pygame.draw.rect(surface, color, blade)
-            tip = [(tx(18), y - 4), (tx(26), y + 3), (tx(18), y + 10)]
-            pygame.draw.polygon(surface, color, tip)
-            pygame.draw.polygon(surface, BLACK, tip, 2)
+            blade = pygame.Rect(min(tx(0), tx(18)), cy_pos + 1, abs(tx(18) - tx(0)), 4)
+            pygame.draw.rect(temp, color, blade)
+            tip = [(tx(18), cy_pos - 4), (tx(26), cy_pos + 3), (tx(18), cy_pos + 10)]
+            pygame.draw.polygon(temp, color, tip)
+            pygame.draw.polygon(temp, BLACK, tip, 2)
         else:
-            rect = pygame.Rect(min(tx(0), tx(18)), y + 2, abs(tx(18) - tx(0)), 6)
-            pygame.draw.rect(surface, color, rect)
-            pygame.draw.rect(surface, BLACK, rect, 2)
+            rect = pygame.Rect(min(tx(0), tx(18)), cy_pos + 2, abs(tx(18) - tx(0)), 6)
+            pygame.draw.rect(temp, color, rect)
+            pygame.draw.rect(temp, BLACK, rect, 2)
+
+        if angle != 0:
+            rotated_temp = pygame.transform.rotate(temp, angle)
+            # The center of temp was (40, 40). We pivot at (40,40), so cx=0, cy=0 relative to pivot!
+            # So rotated_temp's center is exactly at (x, y).
+            dest_x = x - rotated_temp.get_width() / 2
+            dest_y = y - rotated_temp.get_height() / 2
+            surface.blit(rotated_temp, (dest_x, dest_y))
+        else:
+            dest_x = x - temp.get_width() / 2
+            dest_y = y - temp.get_height() / 2
+            surface.blit(temp, (dest_x, dest_y))
 
 
 class LootDrop:
@@ -190,12 +226,12 @@ class LootDrop:
         if img is not None:
             surface.blit(img, (rx, self.y))
             return
-        kind_color = {"weapon": GOLD, "health": RED, "score": BLUE}.get(self.kind)
+        kind_color = {"weapon": GOLD, "health": RED, "score": BLUE, "invincibility": YELLOW, "double_damage": ORANGE}.get(self.kind)
         if kind_color:
             pygame.draw.rect(surface, kind_color, (rx, self.y, self.SIZE, self.SIZE))
             pygame.draw.rect(surface, WHITE, (rx, self.y, self.SIZE, self.SIZE), 2)
             font = pygame.font.SysFont(None, 14)
-            label = {"weapon": "W", "health": "H", "score": "S"}[self.kind]
+            label = {"weapon": "W", "health": "H", "score": "S", "invincibility": "I", "double_damage": "D"}[self.kind]
             txt = font.render(label, True, BLACK)
             surface.blit(txt, (rx + 4, self.y + 3))
 
@@ -426,8 +462,8 @@ class ReptileEnemy(Enemy):
 
         for plat in platforms:
             pr = self.rect
-            if pr.colliderect(plat.rect) and self.vy >= 0:
-                if pr.bottom - self.vy <= plat.rect.top + 10:
+            if pr.colliderect(plat.rect) and getattr(plat, 'blocks_enemy', True):
+                if self.vy > 0 or (self.vy == 0 and pr.bottom <= plat.rect.top + 5):
                     self.y = plat.rect.top - self.h
                     self.vy = 0
                     self.on_ground = True
@@ -467,6 +503,91 @@ class ReptileEnemy(Enemy):
         self.draw_eyes(surface, cam_x)
         self.draw_health_bar(surface, cam_x)
 
+class BatEnemy(Enemy):
+    def __init__(self, x, y, level_index=0, stage=1):
+        if stage == 3:
+            health = ENEMY_HEALTH_STAGE3[level_index][0] if level_index < len(ENEMY_HEALTH_STAGE3) else 25
+            damage = round(12 * 1.27 * 1.7)
+        else:
+            health = 25
+            damage = 12
+        super().__init__(x, y, health=health, damage=damage, speed=2.5, detection=300, color=(100, 50, 150), score_value=120)
+        self.base_y = float(y)
+        self.wave_t = random.uniform(0, math.pi * 2)
+        self.wave_amp = 15
+        self.anim_tick = 0
+
+    def update(self, platforms, player_x, player_y):
+        if not self.alive:
+            return
+        dist = self._dist_to_player(player_x, player_y)
+        self.wave_t += 0.08
+        self.anim_tick = (self.anim_tick + 1) % 24
+
+        if dist < self.detection:
+            dx = player_x - self.x
+            dy = player_y - self.y
+            length = max(1, math.hypot(dx, dy))
+            self.x += (dx / length) * self.speed * 1.8
+            self.y += (dy / length) * self.speed * 1.2
+            self.facing = 1 if dx > 0 else -1
+        else:
+            self.x += self.patrol_dir * self.speed
+            self.patrol_dist += self.speed
+            if self.patrol_dist >= self.max_patrol:
+                self.patrol_dir *= -1
+                self.patrol_dist = 0
+                self.facing = self.patrol_dir
+            self.y = self.base_y + math.sin(self.wave_t) * self.wave_amp
+
+        if self.hit_flash > 0:
+            self.hit_flash -= 1
+
+    def draw(self, surface, cam_x):
+        if not self.alive:
+            return
+        rx = int(self.x) - cam_x
+        ry = int(self.y)
+        col = WHITE if self.hit_flash % 2 == 1 else self.color
+        pygame.draw.polygon(surface, col, [(rx, ry + self.h // 2), (rx + self.w // 2, ry + self.h), (rx + self.w, ry + self.h // 2), (rx + self.w // 2, ry)])
+        pygame.draw.polygon(surface, BLACK, [(rx, ry + self.h // 2), (rx + self.w // 2, ry + self.h), (rx + self.w, ry + self.h // 2), (rx + self.w // 2, ry)], 2)
+        self.draw_eyes(surface, cam_x)
+        self.draw_health_bar(surface, cam_x)
+
+class ArmoredReptile(ReptileEnemy):
+    def __init__(self, x, y, level_index=0, stage=1):
+        super().__init__(x, y, level_index, stage)
+        self.health = int(self.health * 1.5)
+        self.max_health = self.health
+        self.color = (100, 100, 100)
+        self.score_value = 200
+        self.speed = 1.0
+
+    def draw(self, surface, cam_x):
+        if not self.alive:
+            return
+        rx = int(self.x) - cam_x
+        ry = int(self.y)
+        frame = _animation_frame(LIZARD_FRAMES, self.anim_tick // 10)
+        if frame is None:
+            frame = LIZARD_STATIC
+        if frame is not None:
+            if self.facing < 0:
+                frame = pygame.transform.flip(frame, True, False)
+            tinted = tint_surface(frame, (100, 100, 100))
+            surface.blit(tinted if tinted else frame, (rx, ry))
+            self.draw_health_bar(surface, cam_x)
+            return
+
+        col = WHITE if self.hit_flash % 2 == 1 else self.color
+        pygame.draw.rect(surface, col, (rx, ry, self.w, self.h))
+        pygame.draw.rect(surface, BLACK, (rx, ry, self.w, self.h), 2)
+        for i in range(3):
+            sx = rx + 6 + i * 10
+            pygame.draw.polygon(surface, (50, 50, 50), [(sx, ry), (sx + 4, ry - 6), (sx + 8, ry)])
+            pygame.draw.polygon(surface, BLACK, [(sx, ry), (sx + 4, ry - 6), (sx + 8, ry)], 1)
+        self.draw_eyes(surface, cam_x)
+        self.draw_health_bar(surface, cam_x)
 
 class Player:
     W = 28
@@ -503,6 +624,7 @@ class Player:
         self.attack_cooldown = 0
         self.knockback_timer = 0
         self.invincible = 0
+        self.double_damage_timer = 0
         self.anim_tick = 0
         self.walk_tick = 0
         self.attack_frame_tick = 0
@@ -576,7 +698,7 @@ class Player:
         self.knockback_timer = 18
         self.invincible = 60
 
-    def update(self, platforms, keys):
+    def update(self, platforms, keys, level_width=None):
         speed = 4.5
         accel = 0.9
         decel = 0.75
@@ -597,39 +719,69 @@ class Player:
 
         self.vy = min(self.vy + GRAVITY, 18)
         self.x += self.vx
-        self.x = max(0, min(self.x, LEVEL_WIDTH - self.W))
+        lw = level_width if level_width is not None else LEVEL_WIDTH
+        self.x = max(0, min(self.x, lw - self.W))
+
+        # Horizontal collision
+        for plat in platforms:
+            if not getattr(plat, 'blocks_player', True):
+                continue
+            pr = self.rect
+            if pr.colliderect(plat.rect):
+                if self.vx > 0:
+                    self.x = plat.rect.left - self.W
+                    self.vx = 0
+                elif self.vx < 0:
+                    self.x = plat.rect.right
+                    self.vx = 0
+
         self.y += self.vy
         self.on_ground = False
         self.ground_platform = None
 
+        # Vertical collision
         for plat in platforms:
+            if not getattr(plat, 'blocks_player', True):
+                continue
             pr = self.rect
             if pr.colliderect(plat.rect):
-                overlap_top = plat.rect.top - pr.bottom
-                overlap_bottom = plat.rect.bottom - pr.top
-                overlap_left = plat.rect.left - pr.right
-                overlap_right = plat.rect.right - pr.left
-                min_ov = min(abs(overlap_top), abs(overlap_bottom), abs(overlap_left), abs(overlap_right))
-                if min_ov == abs(overlap_top) and self.vy >= 0:
-                    self.y = plat.rect.top - self.H
-                    self.vy = 0
-                    self.on_ground = True
-                    self.jumps_left = 2
-                    self.ground_platform = plat
-                elif min_ov == abs(overlap_bottom) and self.vy < 0:
+                if self.vy > 0 or (self.vy == 0 and pr.bottom <= plat.rect.top + 5):
+                    # Landing on top
+                    bounciness = getattr(plat, 'bounciness', None)
+                    if bounciness is not None:
+                        self.vy = bounciness
+                        self.on_ground = False
+                        self.y = plat.rect.top - self.H - 1
+                    else:
+                        if hasattr(plat, 'breaking') and not plat.breaking:
+                            plat.breaking = True
+                        self.y = plat.rect.top - self.H
+                        self.vy = 0
+                        self.on_ground = True
+                        self.jumps_left = 2
+                        self.ground_platform = plat
+                elif self.vy < 0:
+                    # Hitting head on bottom
                     self.y = plat.rect.bottom
                     self.vy = 0
-                elif min_ov == abs(overlap_left):
-                    self.x = plat.rect.left - self.W
-                    self.vx = 0
-                elif min_ov == abs(overlap_right):
-                    self.x = plat.rect.right
-                    self.vx = 0
 
         if self.on_ground and self.ground_platform is not None:
             if getattr(self.ground_platform, 'axis', None) == 'horizontal':
                 self.x += self.ground_platform.vx
-                self.x = max(0, min(self.x, LEVEL_WIDTH - self.W))
+                lw = level_width if level_width is not None else LEVEL_WIDTH
+                self.x = max(0, min(self.x, lw - self.W))
+                
+                # Re-check horizontal collision if moving with platform
+                for plat in platforms:
+                    if plat is self.ground_platform or not getattr(plat, 'blocks_player', True):
+                        continue
+                    pr = self.rect
+                    if pr.colliderect(plat.rect):
+                        if self.ground_platform.vx > 0:
+                            self.x = plat.rect.left - self.W
+                        elif self.ground_platform.vx < 0:
+                            self.x = plat.rect.right
+                        
             elif getattr(self.ground_platform, 'axis', None) == 'vertical':
                 self.y += self.ground_platform.vy
 
@@ -653,6 +805,8 @@ class Player:
             self.attack_cooldown -= 1
         if self.invincible > 0:
             self.invincible -= 1
+        if self.double_damage_timer > 0:
+            self.double_damage_timer -= 1
 
     def _render_sprite_frame(self, surface, rx, ry, sprite):
         base_surface = None
@@ -680,8 +834,10 @@ class Player:
         rx = int(self.x) - cam_x
         ry = int(self.y)
 
-        if self.invincible > 0 and self.invincible % 6 < 3:
-            return
+        # Flashing effect when invincible, but only if less than a second left or taking knockback
+        if self.invincible > 0:
+            if (self.invincible < 60 or self.knockback_timer > 0) and self.invincible % 6 < 3:
+                return
 
         walking = self.on_ground and abs(self.vx) > 0.3
         sprite = None
@@ -703,7 +859,16 @@ class Player:
                     wx = rx + 32
                 else:
                     wx = rx - 4
-                w.draw(surface, wx, ry + 22, self.facing)
+                    
+                angle = 0
+                if self.attacking:
+                    # Timer goes from 12 down to 0 (default attack timer)
+                    progress = 1.0 - (self.attack_timer / 12.0)
+                    # Swing from +90 degrees down to -45 degrees
+                    swing = 90 - (progress * 135)
+                    angle = -swing if self.facing > 0 else swing
+                    
+                w.draw(surface, wx, ry + 22, self.facing, angle)
             if self.attacking:
                 if self.facing > 0:
                     arm_x = rx + 24
@@ -715,6 +880,10 @@ class Player:
                 s = pygame.Surface((ar.w, ar.h), pygame.SRCALPHA)
                 s.fill((255, 255, 100, 60))
                 surface.blit(s, (ar.x, ar.y))
+            if self.double_damage_timer > 0:
+                pygame.draw.circle(surface, ORANGE, (rx + self.W // 2, ry + self.H // 2), 25, 2)
+            if self.invincible > 60:
+                pygame.draw.circle(surface, YELLOW, (rx + self.W // 2, ry + self.H // 2), 28, 2)
             return
 
         shoulder_rect = pygame.Rect(rx + 4, ry + 18, 20, 10)
@@ -749,8 +918,14 @@ class Player:
                 wx = rx + 32
             else:
                 wx = rx - 4
-            w.draw(surface, wx, ry + 22, self.facing)
-
+                
+            angle = 0
+            if self.attacking:
+                progress = 1.0 - (self.attack_timer / 12.0)
+                swing = 90 - (progress * 135)
+                angle = -swing if self.facing > 0 else swing
+                
+            w.draw(surface, wx, ry + 22, self.facing, angle)
         if self.attacking:
             if self.facing > 0:
                 arm_x = rx + 24
@@ -763,3 +938,8 @@ class Player:
             s = pygame.Surface((ar.w, ar.h), pygame.SRCALPHA)
             s.fill((255, 255, 100, 60))
             surface.blit(s, (ar.x, ar.y))
+            
+        if self.double_damage_timer > 0:
+            pygame.draw.circle(surface, ORANGE, (rx + self.W // 2, ry + self.H // 2), 25, 2)
+        if self.invincible > 60:
+            pygame.draw.circle(surface, YELLOW, (rx + self.W // 2, ry + self.H // 2), 28, 2)
