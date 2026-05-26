@@ -40,7 +40,8 @@ def _tile_texture(surface, texture, rx, y, width):
     x = rx
     end_x = rx + width
     while x < end_x:
-        surface.blit(texture, (x, y))
+        draw_width = min(tile_w, end_x - x)
+        surface.blit(texture, (x, y), (0, 0, draw_width, texture.get_height()))
         x += tile_w
     return True
 
@@ -138,6 +139,35 @@ class MovingPlatform(Platform):
                     barrier.rect.x = self.rect.right
 
 
+class BouncyPlatform(Platform):
+    def __init__(self, x, y, w, h=18, color=(255, 100, 200)):
+        super().__init__(x, y, w, h, color)
+        self.bounciness = -18.0
+
+class FragilePlatform(Platform):
+    def __init__(self, x, y, w, h=18, color=(150, 150, 150)):
+        super().__init__(x, y, w, h, color)
+        self.health = 30
+        self.breaking = False
+
+    def update(self):
+        if self.breaking:
+            self.health -= 1
+            if self.health <= 0:
+                self.blocks_player = False
+                self.blocks_enemy = False
+                self.is_solid_ground = False
+
+    def draw(self, surface, cam_x):
+        if self.health <= 0:
+            return
+        offset_y = random.randint(-2, 2) if self.breaking else 0
+        rx = self.rect.x - cam_x
+        pygame.draw.rect(surface, self.color, (rx, self.rect.y + offset_y, self.rect.w, self.rect.h))
+        pygame.draw.rect(surface, BLACK, (rx, self.rect.y + offset_y, self.rect.w, self.rect.h), 2)
+        if self.breaking:
+            pygame.draw.line(surface, BLACK, (rx, self.rect.y + offset_y), (rx + self.rect.w, self.rect.y + offset_y + self.rect.h), 2)
+
 class Crate:
     SIZE = 36
 
@@ -149,8 +179,8 @@ class Crate:
         self.alive = True
         self.weapon_pool = weapon_pool
 
-    def take_hit(self):
-        self.health -= 1
+    def take_hit(self, damage=1):
+        self.health -= damage
         if self.health <= 0:
             self.alive = False
             return self._drop_loot()

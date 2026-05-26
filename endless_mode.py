@@ -28,10 +28,10 @@ from constants import (
     SCREEN_WIDTH, SCREEN_HEIGHT, THEMES, WEAPON_POOL_STAGE3
 )
 from level import (
-    Platform, MovingPlatform, Crate, PLATFORM_GROUND_IMG, 
+    Platform, MovingPlatform, BouncyPlatform, FragilePlatform, Crate, PLATFORM_GROUND_IMG, 
     PLATFORM_TILE_IMG, PLATFORM_MOVING_IMG, TEAL, ORANGE
 )
-from entities import ReptileEnemy, InsectEnemy, LootDrop
+from entities import ReptileEnemy, InsectEnemy, BatEnemy, ArmoredReptile, LootDrop
 
 
 class DifficultyManager:
@@ -175,6 +175,16 @@ class PlatformSpawner:
         )
         return platform
     
+    def generate_bouncy_platform(self, x, base_platform):
+        width = random.randint(60, 120)
+        y = self.ground_y - random.randint(120, 280)
+        return BouncyPlatform(x, y, width)
+
+    def generate_fragile_platform(self, x, base_platform):
+        width = random.randint(80, 150)
+        y = self.ground_y - random.randint(120, 280)
+        return FragilePlatform(x, y, width)
+    
     def generate_moving_platform(self, x, base_platform, is_horizontal=True):
         """Generate a moving platform"""
         width = random.randint(100, 170)
@@ -232,15 +242,24 @@ class EnemySpawner:
         return random.random() < chance
     
     def select_enemy_type(self, platform, is_elevated):
-        """Select insect or reptile based on platform characteristics"""
+        """Select enemy type based on platform characteristics"""
+        rand = random.random()
         if is_elevated:
-            # Insects prefer high platforms
-            preference = 0.70
+            if rand < 0.50:
+                return "insect"
+            elif rand < 0.80:
+                return "bat"
+            else:
+                return "reptile"
         else:
-            # Reptiles prefer ground level
-            preference = 0.55
-        
-        return "insect" if random.random() < preference else "reptile"
+            if rand < 0.40:
+                return "reptile"
+            elif rand < 0.70:
+                return "armored_reptile"
+            elif rand < 0.85:
+                return "insect"
+            else:
+                return "bat"
     
     def spawn_enemy(self, platform, enemy_type, difficulty_manager, score):
         """Create an enemy with appropriate stats for current difficulty"""
@@ -251,6 +270,12 @@ class EnemySpawner:
         if enemy_type == "reptile":
             ey = platform.rect.y - 34
             enemy = ReptileEnemy(ex, ey, level_index=0, stage=self.stage)
+        elif enemy_type == "armored_reptile":
+            ey = platform.rect.y - 34
+            enemy = ArmoredReptile(ex, ey, level_index=0, stage=self.stage)
+        elif enemy_type == "bat":
+            ey = platform.rect.y - 60
+            enemy = BatEnemy(ex, ey, level_index=0, stage=self.stage)
         else:
             ey = platform.rect.y - 50
             enemy = InsectEnemy(ex, ey, level_index=0, stage=self.stage)
@@ -270,9 +295,11 @@ class LootSpawner:
     """
     
     # Loot probabilities
-    WEAPON_CHANCE = 0.50
-    HEALTH_CHANCE = 0.25
-    SCORE_CHANCE = 0.25
+    WEAPON_CHANCE = 0.40
+    HEALTH_CHANCE = 0.20
+    SCORE_CHANCE = 0.20
+    INVINCIBLE_CHANCE = 0.10
+    DOUBLE_DAMAGE_CHANCE = 0.10
     
     def __init__(self):
         self.weapon_pool = WEAPON_POOL_STAGE3
@@ -289,6 +316,10 @@ class LootSpawner:
             return LootDrop(cx, cy, "weapon", dict(weapon_data))
         elif roll < self.WEAPON_CHANCE + self.HEALTH_CHANCE:
             return LootDrop(cx, cy, "health")
+        elif roll < self.WEAPON_CHANCE + self.HEALTH_CHANCE + self.INVINCIBLE_CHANCE:
+            return LootDrop(cx, cy, "invincibility")
+        elif roll < self.WEAPON_CHANCE + self.HEALTH_CHANCE + self.INVINCIBLE_CHANCE + self.DOUBLE_DAMAGE_CHANCE:
+            return LootDrop(cx, cy, "double_damage")
         else:
             return LootDrop(cx, cy, "score")
 
@@ -407,14 +438,17 @@ class ChunkGenerator:
             if self.platform_spawner.should_generate_elevated(self.difficulty_manager):
                 elev_width = random.randint(90, 160)
                 max_elev_x = max(12, platform_width - elev_width - 12)
-                if max_elev_x > 12:
-                    elev_x = x + random.randint(12, max_elev_x)
-                else:
-                    elev_x = x + 12
+                elev_x = x + random.randint(12, max_elev_x) if max_elev_x > 12 else x + 12
                     
-                elev = self.platform_spawner.generate_elevated_platform(
-                    elev_x, elev_width, platform
-                )
+                rand_plat = random.random()
+                if rand_plat < 0.15:
+                    elev = self.platform_spawner.generate_bouncy_platform(elev_x, platform)
+                elif rand_plat < 0.30:
+                    elev = self.platform_spawner.generate_fragile_platform(elev_x, platform)
+                else:
+                    elev = self.platform_spawner.generate_elevated_platform(
+                        elev_x, elev_width, platform
+                    )
                 platforms.append(elev)
                 
                 # Spawn entities on elevated platform
@@ -483,6 +517,7 @@ class EndlessGameManager:
         # Game state
         self.platforms = []
         self.moving_platforms = []
+        self.fragile_platforms = []
         self.enemies = []
         self.crates = []
         self.loots = []
@@ -500,7 +535,7 @@ class EndlessGameManager:
     
     def _initialize_starting_area(self):
         """Create initial ground platform for starting position"""
-        start_width = 1400
+        start_width = 400  # Reduced from 1400 to spawn enemies much sooner
         ground = Platform(
             0, self.GROUND_Y, start_width, 60,
             self.theme["platform_color"],
@@ -522,6 +557,7 @@ class EndlessGameManager:
             
             self.platforms.extend(platforms)
             self.moving_platforms.extend([p for p in platforms if isinstance(p, MovingPlatform)])
+            self.fragile_platforms.extend([p for p in platforms if isinstance(p, FragilePlatform)])
             self.enemies.extend(enemies)
             self.crates.extend(crates)
             
@@ -534,6 +570,7 @@ class EndlessGameManager:
         # Keep platforms that are visible or might come back into view
         self.platforms = [p for p in self.platforms if p.rect.right >= cutoff_x]
         self.moving_platforms = [p for p in self.moving_platforms if p.rect.right >= cutoff_x]
+        self.fragile_platforms = [p for p in self.fragile_platforms if p.rect.right >= cutoff_x]
         
         # Clean up enemies (keep alive ones and those still visible)
         self.enemies = [e for e in self.enemies if e.alive or e.x + e.w >= cutoff_x]
@@ -553,6 +590,10 @@ class EndlessGameManager:
         
         # Update moving platforms
         for platform in self.moving_platforms:
+            platform.update()
+            
+        # Update fragile platforms
+        for platform in self.fragile_platforms:
             platform.update()
         
         # Generate level ahead of player if needed
@@ -577,7 +618,8 @@ class EndlessGameManager:
             for enemy in self.enemies:
                 if enemy.alive and enemy.rect.colliderect(player.attack_rect):
                     weapon = player.weapon
-                    enemy.take_damage(weapon.damage)
+                    dmg = weapon.damage * 2 if player.double_damage_timer > 0 else weapon.damage
+                    enemy.take_damage(dmg)
                     if not enemy.alive:
                         player.score += int(round(enemy.score_value * player.score_multiplier))
         
@@ -585,9 +627,13 @@ class EndlessGameManager:
         if player.attack_rect:
             for crate in self.crates:
                 if crate.alive and crate.rect.colliderect(player.attack_rect):
-                    loot = crate.take_hit()
-                    if loot:
-                        self.loots.append(loot)
+                    weapon = player.weapon
+                    dmg = weapon.damage * 2 if player.double_damage_timer > 0 else weapon.damage
+                    _ = crate.take_hit(dmg)
+                    if not crate.alive:
+                        loot = self.chunk_generator.loot_spawner.spawn_loot(crate)
+                        if loot:
+                            self.loots.append(loot)
         
         # Handle loot pickup
         for loot in self.loots[:]:
@@ -598,6 +644,10 @@ class EndlessGameManager:
                     player.health = min(player.max_health, player.health + 25)
                 elif loot.kind == "score":
                     player.score += 50
+                elif loot.kind == "invincibility":
+                    player.invincible += 600
+                elif loot.kind == "double_damage":
+                    player.double_damage_timer += 600
                 self.loots.remove(loot)
         
         # Clean up off-screen objects

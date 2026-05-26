@@ -12,7 +12,7 @@ SAVE_FILE = os.path.join(os.path.dirname(__file__), "savescores.json")
 
 
 def load_saved_scores():
-    default = {"first": [0, 0, 0, 0], "second": [0, 0, 0, 0], "third": [0, 0, 0, 0], "continue": False}
+    default = {"first": [0, 0, 0, 0], "second": [0, 0, 0, 0], "third": [], "continue": False}
     try:
         if not os.path.exists(SAVE_FILE):
             with open(SAVE_FILE, "w") as f:
@@ -24,6 +24,22 @@ def load_saved_scores():
             if k not in data or not isinstance(data[k], list):
                 data[k] = default[k]
                 continue
+            
+            if k == "third":
+                new_list = []
+                # Remove index 0 if it was the old 'last_score' and we're migrating
+                src_list = data[k]
+                if len(src_list) > 0 and isinstance(src_list[0], int):
+                    src_list = src_list[1:] # Drop the old last_score
+                for v in src_list:
+                    if isinstance(v, dict) and "name" in v and "score" in v:
+                        new_list.append({"name": str(v["name"])[:3].upper(), "score": int(v["score"])})
+                    elif isinstance(v, int) and v > 0:
+                        new_list.append({"name": "---", "score": int(v)})
+                new_list = sorted(new_list, key=lambda x: x["score"], reverse=True)[:10]
+                data[k] = new_list
+                continue
+
             values = [int(v) for v in data[k] if isinstance(v, int) or (isinstance(v, str) and v.isdigit())]
             if len(values) == 3:
                 top_scores = sorted(values, reverse=True)[:3]
@@ -34,8 +50,12 @@ def load_saved_scores():
                 while len(top_scores) < 3:
                     top_scores.append(0)
                 data[k] = [last_score] + top_scores
+                
         if "continue" not in data or not isinstance(data["continue"], bool):
-            data["continue"] = any(v > 0 for v in data["first"] + data["second"] + data["third"])
+            continue_found = any(v > 0 for v in data["first"] + data["second"])
+            if not continue_found:
+                continue_found = any(v.get("score", 0) > 0 for v in data["third"])
+            data["continue"] = continue_found
         return data
     except Exception:
         with open(SAVE_FILE, "w") as f:
@@ -95,26 +115,36 @@ def main(stage=1):
     # Load persisted scoreboard data
     scoreboard = load_saved_scores()
 
-    def save_score_callback(stage_idx, score):
+    def save_score_callback(stage_idx, score, name="---"):
         if stage_idx == 1:
             key = "first"
         elif stage_idx == 2:
             key = "second"
         else:
             key = "third"
-        arr = scoreboard.get(key, [0, 0, 0, 0])[:]
+            
         last_score = int(score)
-        top_scores = arr[1:4] if len(arr) > 1 else [0, 0, 0]
-        top_scores.append(last_score)
-        top_scores = sorted(top_scores, reverse=True)[:3]
-        scoreboard[key] = [last_score] + top_scores
+        
+        if key == "third":
+            arr = scoreboard.get(key, [])[:]
+            arr.append({"name": name.upper(), "score": last_score})
+            arr = sorted(arr, key=lambda x: x["score"], reverse=True)[:10]
+            scoreboard[key] = arr
+        else:
+            arr = scoreboard.get(key, [0, 0, 0, 0])[:]
+            top_scores = arr[1:4] if len(arr) > 1 else [0, 0, 0]
+            top_scores.append(last_score)
+            top_scores = sorted(top_scores, reverse=True)[:3]
+            scoreboard[key] = [last_score] + top_scores
+            
         scoreboard["continue"] = True
         write_saved_scores(scoreboard)
 
     def reset_scores_callback():
-        scoreboard["first"] = [0, 0, 0, 0]
-        scoreboard["second"] = [0, 0, 0, 0]
-        scoreboard["third"] = [0, 0, 0, 0]
+        if len(scoreboard.get("first", [])) > 0:
+            scoreboard["first"][0] = 0
+        if len(scoreboard.get("second", [])) > 0:
+            scoreboard["second"][0] = 0
         scoreboard["continue"] = False
         write_saved_scores(scoreboard)
 
@@ -147,6 +177,7 @@ def main(stage=1):
 
         paused = False
         running = True
+        quit_to_menu = False
         while running:
             keys = pygame.key.get_pressed()
             for event in pygame.event.get():
@@ -196,8 +227,11 @@ def main(stage=1):
                                 player.ground_platform = None
                                 paused = False
                         elif quit_rect.collidepoint(mouse_pos):
-                            pygame.quit()
-                            sys.exit()
+                            if stage == 3:
+                                save_score_callback(stage, player.score)
+                            quit_to_menu = True
+                            running = False
+                            break
                     continue
                 player.handle_event(event)
 
@@ -208,7 +242,7 @@ def main(stage=1):
                 clock.tick(FPS)
                 continue
 
-            player.update(level.platforms, keys)
+            player.update(level.platforms, keys, getattr(level, 'level_width', None))
             
             if stage == 3:
                 # Endless mode: use delta_time for proper scaling
@@ -249,14 +283,21 @@ def main(stage=1):
 
             level.draw(screen, cam_x)
             player.draw(screen, cam_x)
-            ui.draw(screen, player, level.total_enemies, level.enemies_alive())
+            ui.draw(screen, player, level.total_enemies, level.enemies_alive(), scoreboard)
 
             pygame.display.flip()
             clock.tick(FPS)
 
+        if quit_to_menu:
+            start_result = None
+            continue
+
         # Provide save callback so user can save the score from the end screen
         end_result = show_end_screen(screen, clock, won, player.score, save_callback=save_score_callback, stage=stage, scoreboard=scoreboard)
-        start_result = end_result
+        if end_result == "MENU":
+            start_result = None
+        else:
+            start_result = end_result
 
 
 if __name__ == "__main__":
